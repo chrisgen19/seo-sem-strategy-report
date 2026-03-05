@@ -27,10 +27,10 @@ import textwrap
 from datetime import datetime
 from urllib.parse import urlparse, urljoin
 
-# Load .env file if present (requires: pip install python-dotenv)
+# Load .env from the script's own directory (works regardless of cwd)
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 except ImportError:
     pass  # python-dotenv not installed — rely on shell environment variables
 
