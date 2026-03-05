@@ -1118,7 +1118,7 @@ def main():
         output_path = args.output
     else:
         domain = urlparse(url).netloc.replace("www.", "").replace(".", "-")
-        output_path = f"SEO-Report-{domain}-{datetime.now().strftime('%Y%m%d')}.docx"
+        output_path = f"SEO-Report-{domain}-{datetime.now().strftime('%Y%m%d-%H%M')}.docx"
 
     print("╔══════════════════════════════════════════════╗")
     print("║         SEO & SEM AUDIT TOOL                ║")
