@@ -148,14 +148,12 @@ def compute_scores(analysis: dict) -> dict:
 
 def _history_path(url: str) -> str:
     """Return the history JSON file path for a given domain."""
-    import os
     domain = urlparse(url).netloc.replace("www.", "").replace(".", "-")
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), f"seo-history-{domain}.json")
 
 
 def load_history(url: str) -> list:
     """Load previous audit runs for this domain."""
-    import os
     path = _history_path(url)
     if os.path.exists(path):
         try:
@@ -384,13 +382,6 @@ class SEOCrawler:
             else:
                 external.append(entry)
 
-        # Check for potential broken links (links pointing to wrong pages)
-        link_destinations = {}
-        for link in internal:
-            text = link["text"].lower()
-            href = link["href"].lower()
-            link_destinations[text] = href
-
         self.data["internal_links"] = internal[:50]  # Cap for API
         self.data["internal_link_count"] = len(internal)
         self.data["external_links"] = external[:20]
@@ -480,13 +471,17 @@ class SEOCrawler:
         """Check HTTPS and SSL."""
         print("  🔒 Checking HTTPS...")
         self.data["is_https"] = self.parsed_url.scheme == "https"
-        # Check for mixed content
+        # Check for mixed content (images/scripts via src, stylesheets via href)
         soup = BeautifulSoup(self.html, "lxml")
         mixed = []
-        for tag in soup.find_all(["img", "script", "link"], src=True):
+        for tag in soup.find_all(["img", "script"]):
             src = tag.get("src", "")
             if src.startswith("http://"):
                 mixed.append(src[:100])
+        for tag in soup.find_all("link", rel=lambda r: r and "stylesheet" in r):
+            href = tag.get("href", "")
+            if href.startswith("http://"):
+                mixed.append(href[:100])
         self.data["mixed_content"] = mixed[:10]
         self.data["has_mixed_content"] = len(mixed) > 0
         print(f"    HTTPS: {'Yes' if self.data['is_https'] else 'No'} | Mixed content: {len(mixed)} items")
@@ -684,7 +679,12 @@ def analyze_with_claude(crawl_data: dict, api_key: str) -> dict:
         if hasattr(block, "text"):
             text += block.text
 
-    result = _parse_json_response(text)
+    try:
+        result = _parse_json_response(text)
+    except (json.JSONDecodeError, ValueError) as e:
+        print(f"\n❌ Claude returned invalid JSON: {e}")
+        print("   Raw response (first 500 chars):", text[:500])
+        sys.exit(1)
     print("   ✅ Analysis complete!")
     return result
 
@@ -705,7 +705,12 @@ def analyze_with_gemini(crawl_data: dict, api_key: str) -> dict:
     )
 
     text = response.text
-    result = _parse_json_response(text)
+    try:
+        result = _parse_json_response(text)
+    except (json.JSONDecodeError, ValueError) as e:
+        print(f"\n❌ Gemini returned invalid JSON: {e}")
+        print("   Raw response (first 500 chars):", text[:500])
+        sys.exit(1)
     print("   ✅ Analysis complete!")
     return result
 
@@ -880,12 +885,10 @@ def generate_report(analysis: dict, url: str, output_path: str, previous_run: di
     overall_score = analysis.get("overall_score", 0)
 
     scores_data = [
-        ("Technical SEO",          tech_score,     analysis.get("technical_seo", {}).get("grade", "N/A"),    _delta_str(tech_score, "technical_score")),
-        ("Content SEO",            content_score,  analysis.get("content_seo", {}).get("grade", "N/A"),      _delta_str(content_score, "content_score")),
-        ("SEM / AdWords Readiness", sem_score,     analysis.get("sem_readiness", {}).get("score", 0) and analysis.get("sem_readiness", {}).get("grade", "N/A"), _delta_str(sem_score, "sem_score")),
+        ("Technical SEO",           tech_score,    analysis.get("technical_seo", {}).get("grade", "N/A"),    _delta_str(tech_score, "technical_score")),
+        ("Content SEO",             content_score, analysis.get("content_seo", {}).get("grade", "N/A"),      _delta_str(content_score, "content_score")),
+        ("SEM / AdWords Readiness", sem_score,     analysis.get("sem_readiness", {}).get("grade", "N/A"),    _delta_str(sem_score, "sem_score")),
     ]
-    # fix sem grade reference
-    scores_data[2] = ("SEM / AdWords Readiness", sem_score, analysis.get("sem_readiness", {}).get("grade", "N/A"), _delta_str(sem_score, "sem_score"))
 
     has_history = previous_run is not None
     col_count = 4 if has_history else 3
