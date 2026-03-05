@@ -396,18 +396,42 @@ class SEOCrawler:
         print("  🖼️  Extracting images...")
         images = []
         for img in soup.find_all("img"):
-            src = img.get("src", "")
+            # Try to get the real src — NitroPack and other lazy-loaders replace src
+            # with a base64 placeholder and store the real URL in a data attribute
+            raw_src = img.get("src", "")
+            real_src = (
+                img.get("data-nitro-lazy-src") or
+                img.get("data-src") or
+                img.get("data-lazy-src") or
+                img.get("data-original") or
+                img.get("data-lazy") or
+                (raw_src if not ("base64" in raw_src or "nitro-empty" in raw_src) else "")
+            )
+            src = real_src or raw_src  # fallback to raw if no real src found
+            is_placeholder = "base64" in raw_src or "nitro-empty" in raw_src
+
             alt = img.get("alt", "")
             width = img.get("width")
             height = img.get("height")
+            # Also check data-width/data-height for lazy-loaded images
+            if not (width and height):
+                width = img.get("data-width")
+                height = img.get("data-height")
             loading = img.get("loading")
+
+            # Detect format from real src, not placeholder
+            ext = src.split(".")[-1].split("?")[0].lower() if "." in src else "unknown"
+            if ext not in ("jpg", "jpeg", "png", "gif", "webp", "svg", "avif", "ico"):
+                ext = "unknown"
+
             images.append({
                 "src": src[:200],
+                "is_placeholder": is_placeholder,
                 "alt": alt[:150],
                 "has_alt": bool(alt.strip()),
                 "has_dimensions": bool(width and height),
-                "has_lazy_loading": loading == "lazy",
-                "format": src.split(".")[-1].split("?")[0].lower() if "." in src else "unknown",
+                "has_lazy_loading": loading == "lazy" or bool(img.get("data-src") or img.get("data-nitro-lazy-src")),
+                "format": ext,
             })
         self.data["images"] = images[:30]
         self.data["image_count"] = len(images)
@@ -1129,24 +1153,43 @@ def generate_report(analysis: dict, url: str, output_path: str, previous_run: di
             10, True, DARK)
         if images:
             t = doc.add_table(rows=1, cols=5)
+            # Set fixed column widths so nothing squishes: total ~9100 twips (6.3")
+            col_widths = [Cm(0.8), Cm(5.5), Cm(5.0), Cm(1.3), Cm(2.5)]
+            for col_i, width in enumerate(col_widths):
+                for cell in t.columns[col_i].cells:
+                    cell.width = width
             style_header_cell(t.rows[0].cells[0], "#")
-            style_header_cell(t.rows[0].cells[1], "Image URL / Filename")
+            style_header_cell(t.rows[0].cells[1], "Image Filename / URL")
             style_header_cell(t.rows[0].cells[2], "Alt Text")
             style_header_cell(t.rows[0].cells[3], "Format")
-            style_header_cell(t.rows[0].cells[4], "Lazy / Dims")
+            style_header_cell(t.rows[0].cells[4], "Lazy-loaded / Dims")
             for i, img in enumerate(images, 1):
                 src = img.get('src', '')
-                # Show just the filename/end of URL for readability
-                src_display = src.split('/')[-1].split('?')[0][:60] or src[:60]
+                is_placeholder = img.get('is_placeholder', False)
+
+                # Show filename if it's a real URL, otherwise label it
+                if is_placeholder and not src:
+                    src_display = "[NitroPack placeholder — real src not found]"
+                elif src.startswith("data:"):
+                    src_display = "[inline base64 image]"
+                else:
+                    filename = src.split('/')[-1].split('?')[0]
+                    src_display = filename[:70] if filename else src[:70]
+
                 alt = img.get('alt', '').strip()
-                alt_display = alt[:80] if alt else '⚠ MISSING'
-                fmt = img.get('format', '?').upper()
+                alt_display = alt[:100] if alt else '⚠ MISSING'
+                fmt = img.get('format', 'unknown').upper()
                 lazy = 'Yes' if img.get('has_lazy_loading') else 'No'
                 dims = 'Yes' if img.get('has_dimensions') else 'No'
+
                 r = t.add_row().cells
+                # Re-apply widths per row (python-docx requires this)
+                for col_i, width in enumerate(col_widths):
+                    r[col_i].width = width
+
                 style_cell(r[0], str(i), alignment=WD_ALIGN_PARAGRAPH.CENTER)
-                style_cell(r[1], src_display)
-                # Highlight missing alt
+                style_cell(r[1], src_display, color=GRAY if is_placeholder else DARK)
+                # Alt text — red if missing
                 p = r[2].paragraphs[0]
                 p.clear()
                 run = p.add_run(alt_display)
@@ -1158,7 +1201,7 @@ def generate_report(analysis: dict, url: str, output_path: str, previous_run: di
                 else:
                     run.font.color.rgb = DARK
                 style_cell(r[3], fmt)
-                style_cell(r[4], f"Lazy: {lazy} / Dims: {dims}")
+                style_cell(r[4], f"Lazy: {lazy}  |  Dims: {dims}")
         else:
             add_styled_paragraph(doc, "No images found.", 10, False, GRAY)
 
