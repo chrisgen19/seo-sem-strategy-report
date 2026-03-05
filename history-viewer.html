@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SEO Audit History Viewer</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #f0f4f8;
+    color: #1a202c;
+    min-height: 100vh;
+  }
+
+  header {
+    background: #1F4E79;
+    color: #fff;
+    padding: 20px 32px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  header h1 { font-size: 1.3rem; font-weight: 700; }
+  header p  { font-size: 0.85rem; opacity: 0.75; margin-top: 2px; }
+
+  .container { max-width: 1200px; margin: 0 auto; padding: 28px 20px; }
+
+  /* Drop zone */
+  #drop-zone {
+    border: 2px dashed #93c5fd;
+    border-radius: 12px;
+    background: #fff;
+    padding: 60px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+  }
+  #drop-zone.drag-over { border-color: #1F4E79; background: #EFF6FF; }
+  #drop-zone svg { color: #93c5fd; margin-bottom: 14px; }
+  #drop-zone h2 { font-size: 1.1rem; color: #374151; margin-bottom: 6px; }
+  #drop-zone p  { font-size: 0.85rem; color: #6b7280; }
+  #drop-zone input { display: none; }
+
+  /* Main dashboard */
+  #dashboard { display: none; }
+
+  /* Score cards */
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin-bottom: 24px;
+  }
+  .card {
+    background: #fff;
+    border-radius: 10px;
+    padding: 18px 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.08);
+  }
+  .card .label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: .06em; color: #6b7280; margin-bottom: 6px; }
+  .card .score { font-size: 2rem; font-weight: 800; line-height: 1; }
+  .card .grade { font-size: 0.85rem; color: #6b7280; margin-top: 4px; }
+  .card .delta { font-size: 0.78rem; margin-top: 6px; font-weight: 600; }
+  .delta.up   { color: #16a34a; }
+  .delta.down { color: #dc2626; }
+  .delta.same { color: #6b7280; }
+
+  /* Score color helpers */
+  .score-a  { color: #16a34a; }
+  .score-b  { color: #2563eb; }
+  .score-c  { color: #d97706; }
+  .score-df { color: #dc2626; }
+
+  /* Two-column layout */
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+
+  /* Panel */
+  .panel {
+    background: #fff;
+    border-radius: 10px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.08);
+    overflow: hidden;
+  }
+  .panel-header {
+    padding: 14px 20px;
+    border-bottom: 1px solid #f3f4f6;
+    font-weight: 700;
+    font-size: 0.9rem;
+    color: #1F4E79;
+  }
+  .panel-body { padding: 16px 20px; }
+
+  /* Chart */
+  .chart-wrap { padding: 20px; }
+
+  /* Run history table */
+  table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+  th {
+    text-align: left;
+    padding: 9px 12px;
+    background: #f9fafb;
+    color: #6b7280;
+    font-weight: 600;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  td { padding: 9px 12px; border-bottom: 1px solid #f3f4f6; }
+  tr:last-child td { border-bottom: none; }
+  tr.run-row { cursor: pointer; transition: background 0.1s; }
+  tr.run-row:hover { background: #f0f7ff; }
+  tr.run-row.active { background: #dbeafe; }
+
+  /* Badge */
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 99px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #fff;
+  }
+  .badge-pass { background: #16a34a; }
+  .badge-warn { background: #d97706; }
+  .badge-fail { background: #dc2626; }
+
+  /* Check results grid */
+  .checks-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 20px;
+  }
+  .check-section h3 {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: #1F4E79;
+    margin-bottom: 10px;
+    font-weight: 700;
+  }
+  .check-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 5px 0;
+    border-bottom: 1px solid #f3f4f6;
+    font-size: 0.8rem;
+  }
+  .check-item:last-child { border-bottom: none; }
+  .check-name { color: #374151; }
+
+  /* No data */
+  .empty { text-align: center; padding: 40px; color: #9ca3af; font-size: 0.9rem; }
+
+  /* Url tag */
+  .url-tag {
+    display: inline-block;
+    background: #eff6ff;
+    color: #1d4ed8;
+    padding: 3px 10px;
+    border-radius: 99px;
+    font-size: 0.78rem;
+    margin-bottom: 20px;
+  }
+
+  @media (max-width: 900px) {
+    .cards { grid-template-columns: repeat(2, 1fr); }
+    .row { grid-template-columns: 1fr; }
+    .checks-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>SEO Audit History Viewer</h1>
+    <p>Load a <code>seo-history-*.json</code> file to visualise your progress</p>
+  </div>
+</header>
+
+<div class="container">
+
+  <!-- Drop zone -->
+  <div id="drop-zone">
+    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/>
+    </svg>
+    <h2>Drop your history JSON here</h2>
+    <p>or <label for="file-input" style="color:#1d4ed8;cursor:pointer;text-decoration:underline">browse to select</label> a <code>seo-history-*.json</code> file</p>
+    <input type="file" id="file-input" accept=".json">
+  </div>
+
+  <!-- Dashboard -->
+  <div id="dashboard">
+
+    <div class="url-tag" id="url-tag"></div>
+
+    <!-- Score cards -->
+    <div class="cards">
+      <div class="card">
+        <div class="label">Overall</div>
+        <div class="score" id="c-overall">—</div>
+        <div class="grade" id="c-overall-grade"></div>
+        <div class="delta" id="c-overall-delta"></div>
+      </div>
+      <div class="card">
+        <div class="label">Technical SEO</div>
+        <div class="score" id="c-tech">—</div>
+        <div class="grade" id="c-tech-grade"></div>
+        <div class="delta" id="c-tech-delta"></div>
+      </div>
+      <div class="card">
+        <div class="label">Content SEO</div>
+        <div class="score" id="c-content">—</div>
+        <div class="grade" id="c-content-grade"></div>
+        <div class="delta" id="c-content-delta"></div>
+      </div>
+      <div class="card">
+        <div class="label">SEM Readiness</div>
+        <div class="score" id="c-sem">—</div>
+        <div class="grade" id="c-sem-grade"></div>
+        <div class="delta" id="c-sem-delta"></div>
+      </div>
+    </div>
+
+    <!-- Chart + Run list -->
+    <div class="row">
+      <div class="panel">
+        <div class="panel-header">Score Trend</div>
+        <div class="chart-wrap">
+          <canvas id="trend-chart" height="220"></canvas>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header">All Runs — click a row to inspect</div>
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Overall</th>
+              <th>Technical</th>
+              <th>Content</th>
+              <th>SEM</th>
+            </tr>
+          </thead>
+          <tbody id="runs-table"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Check details -->
+    <div class="panel" id="checks-panel">
+      <div class="panel-header" id="checks-panel-title">Check Results</div>
+      <div class="panel-body">
+        <div class="checks-grid" id="checks-grid"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+let chart = null;
+let history = [];
+
+// ── File loading ──────────────────────────────────────────────────
+const dropZone = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) loadFile(file);
+});
+fileInput.addEventListener('change', e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
+
+function loadFile(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      history = JSON.parse(e.target.result);
+      if (!Array.isArray(history) || !history.length) throw new Error('Empty or invalid JSON');
+      render();
+    } catch (err) {
+      alert('Could not parse JSON: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+}
+
+// ── Render dashboard ──────────────────────────────────────────────
+function render() {
+  dropZone.style.display = 'none';
+  document.getElementById('dashboard').style.display = 'block';
+
+  const latest = history[history.length - 1];
+  const prev   = history.length > 1 ? history[history.length - 2] : null;
+
+  // URL tag
+  document.getElementById('url-tag').textContent = latest.url || '';
+
+  // Cards
+  setCard('overall',  latest.overall_score,   latest.overall_grade,   prev?.overall_score);
+  setCard('tech',     latest.technical_score,  latest.technical_grade, prev?.technical_score);
+  setCard('content',  latest.content_score,    latest.content_grade,   prev?.content_score);
+  setCard('sem',      latest.sem_score,        latest.sem_grade,       prev?.sem_score);
+
+  // Chart
+  renderChart();
+
+  // Table
+  renderTable();
+
+  // Default: show latest run checks
+  renderChecks(latest, history.length - 1);
+}
+
+function scoreClass(score) {
+  if (score >= 85) return 'score-a';
+  if (score >= 70) return 'score-b';
+  if (score >= 60) return 'score-c';
+  return 'score-df';
+}
+
+function setCard(id, score, grade, prevScore) {
+  const el = document.getElementById('c-' + id);
+  el.textContent = score;
+  el.className = 'score ' + scoreClass(score);
+  document.getElementById('c-' + id + '-grade').textContent = 'Grade: ' + grade;
+  const deltaEl = document.getElementById('c-' + id + '-delta');
+  if (prevScore != null) {
+    const diff = score - prevScore;
+    if (diff > 0)      { deltaEl.textContent = '▲ +' + diff + ' vs previous'; deltaEl.className = 'delta up'; }
+    else if (diff < 0) { deltaEl.textContent = '▼ ' + diff + ' vs previous'; deltaEl.className = 'delta down'; }
+    else               { deltaEl.textContent = '= no change'; deltaEl.className = 'delta same'; }
+  } else {
+    deltaEl.textContent = 'First run';
+    deltaEl.className = 'delta same';
+  }
+}
+
+function renderChart() {
+  const labels  = history.map(r => r.date.slice(0, 16));
+  const overall  = history.map(r => r.overall_score);
+  const tech     = history.map(r => r.technical_score);
+  const content  = history.map(r => r.content_score);
+  const sem      = history.map(r => r.sem_score);
+
+  if (chart) chart.destroy();
+  chart = new Chart(document.getElementById('trend-chart'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Overall',   data: overall,  borderColor: '#1F4E79', backgroundColor: '#1F4E7922', tension: 0.3, fill: false, pointRadius: 4 },
+        { label: 'Technical', data: tech,     borderColor: '#2563eb', backgroundColor: 'transparent', tension: 0.3, fill: false, pointRadius: 4 },
+        { label: 'Content',   data: content,  borderColor: '#16a34a', backgroundColor: 'transparent', tension: 0.3, fill: false, pointRadius: 4 },
+        { label: 'SEM',       data: sem,      borderColor: '#d97706', backgroundColor: 'transparent', tension: 0.3, fill: false, pointRadius: 4 },
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } } },
+      scales: {
+        y: { min: 0, max: 100, ticks: { font: { size: 11 } }, grid: { color: '#f3f4f6' } },
+        x: { ticks: { font: { size: 10 }, maxRotation: 30 }, grid: { display: false } }
+      }
+    }
+  });
+}
+
+function renderTable() {
+  const tbody = document.getElementById('runs-table');
+  tbody.innerHTML = '';
+  [...history].reverse().forEach((run, i) => {
+    const realIdx = history.length - 1 - i;
+    const tr = document.createElement('tr');
+    tr.className = 'run-row';
+    tr.dataset.idx = realIdx;
+    tr.innerHTML = `
+      <td>${run.date}</td>
+      <td><strong class="${scoreClass(run.overall_score)}">${run.overall_score}</strong> <span style="color:#9ca3af;font-size:.75rem">${run.overall_grade}</span></td>
+      <td>${run.technical_score} <span style="color:#9ca3af;font-size:.75rem">${run.technical_grade}</span></td>
+      <td>${run.content_score} <span style="color:#9ca3af;font-size:.75rem">${run.content_grade}</span></td>
+      <td>${run.sem_score} <span style="color:#9ca3af;font-size:.75rem">${run.sem_grade}</span></td>
+    `;
+    tr.addEventListener('click', () => {
+      document.querySelectorAll('.run-row').forEach(r => r.classList.remove('active'));
+      tr.classList.add('active');
+      renderChecks(run, realIdx);
+    });
+    tbody.appendChild(tr);
+  });
+  // Highlight first row (latest)
+  tbody.querySelector('.run-row')?.classList.add('active');
+}
+
+function renderChecks(run, idx) {
+  const title = document.getElementById('checks-panel-title');
+  title.textContent = `Check Results — ${run.date}`;
+
+  const grid = document.getElementById('checks-grid');
+  grid.innerHTML = '';
+
+  const sections = [
+    { label: 'Technical SEO', key: 'technical' },
+    { label: 'Content SEO',   key: 'content' },
+    { label: 'SEM Readiness', key: 'sem' },
+  ];
+
+  const prevRun = idx > 0 ? history[idx - 1] : null;
+
+  sections.forEach(({ label, key }) => {
+    const checks = run.check_results?.[key] || {};
+    const prevChecks = prevRun?.check_results?.[key] || {};
+
+    const div = document.createElement('div');
+    div.className = 'check-section';
+    div.innerHTML = `<h3>${label}</h3>`;
+
+    Object.entries(checks).forEach(([name, status]) => {
+      const prevStatus = prevChecks[name];
+      let changeIndicator = '';
+      if (prevStatus && prevStatus !== status) {
+        changeIndicator = prevStatus === 'FAIL' && status !== 'FAIL' ? ' <span style="color:#16a34a;font-size:.7rem">▲</span>'
+                        : prevStatus !== 'FAIL' && status === 'FAIL' ? ' <span style="color:#dc2626;font-size:.7rem">▼</span>'
+                        : ' <span style="color:#d97706;font-size:.7rem">~</span>';
+      }
+      const item = document.createElement('div');
+      item.className = 'check-item';
+      item.innerHTML = `
+        <span class="check-name">${name}${changeIndicator}</span>
+        <span class="badge badge-${status.toLowerCase()}">${status}</span>
+      `;
+      div.appendChild(item);
+    });
+
+    if (!Object.keys(checks).length) {
+      div.innerHTML += '<div style="color:#9ca3af;font-size:.8rem">No data</div>';
+    }
+
+    grid.appendChild(div);
+  });
+}
+</script>
+</body>
+</html>
