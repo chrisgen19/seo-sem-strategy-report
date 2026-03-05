@@ -1,0 +1,7 @@
+.env
+*.docx
+*.json
+__pycache__/
+venv/
+.venv/
+seo-history-*.json
